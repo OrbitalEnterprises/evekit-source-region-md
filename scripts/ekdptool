@@ -1,0 +1,9 @@
+#!/bin/bash
+#
+# Run the EveKit Data Platform command line tool
+#
+# -*- CONFIGURED BY INSTALL SCRIPT -*-
+#
+tooljar=INSTALLCONFIG
+exec java -jar ${tooljar} "$@"
+

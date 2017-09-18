@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<modelVersion>4.0.0</modelVersion>
+<parent>
+    <groupId>enterprises.orbital</groupId>
+    <artifactId>license</artifactId>
+    <version>1.1.0</version>
+</parent>
+<groupId>enterprises.orbital.evekit.source</groupId>
+<artifactId>region-md</artifactId>
+<version>1.0.0-SNAPSHOT</version>
+<name>EveKit Data Source - Region Market Data</name>
+<description>Retrieve market data and market history snapshots from regions</description>
+<url>https://github.com/OrbitalEnterprises/evekit-source-region-md</url>
+<scm>
+    <url>https://github.com/OrbitalEnterprises/evekit-source-region-md</url>
+    <connection>scm:git:https://github.com/OrbitalEnterprises/evekit-source-region-md.git</connection>
+    <developerConnection>scm:git:git@github.com:OrbitalEnterprises/evekit-source-region-md.git</developerConnection>
+</scm>
+<properties>
+    <maven.build.timestamp.format>yyyyMMddHHmmss</maven.build.timestamp.format>
+    <enterprises.orbital.evekit.build.timestamp>${maven.build.timestamp}</enterprises.orbital.evekit.build.timestamp>
+    <enterprises.orbital.evekit.dataplatform.db.registry.driver>com.mysql.jdbc.Driver</enterprises.orbital.evekit.dataplatform.db.registry.driver>
+    <enterprises.orbital.evekit.dataplatform.db.registry.dialect>org.hibernate.dialect.MySQLDialect</enterprises.orbital.evekit.dataplatform.db.registry.dialect>
+    <enterprises.orbital.evekit.dataplatform.db.account.driver>com.mysql.jdbc.Driver</enterprises.orbital.evekit.dataplatform.db.account.driver>
+    <enterprises.orbital.evekit.dataplatform.db.account.dialect>org.hibernate.dialect.MySQLDialect</enterprises.orbital.evekit.dataplatform.db.account.dialect>
+    <orbital.data.platform.version>3.1.0</orbital.data.platform.version>
+</properties>
+<dependencies>
+    <dependency>
+        <groupId>enterprises.orbital.evekit</groupId>
+        <artifactId>data-platform</artifactId>
+        <version>${orbital.data.platform.version}</version>
+    </dependency>
+</dependencies>
+<build>
+    <finalName>evekit-${project.artifactId}-${project.version}</finalName>
+    <resources>
+        <resource>
+            <directory>src/main/resources</directory>
+            <filtering>true</filtering>
+        </resource>
+    </resources>
+    <plugins>
+        <plugin>
+            <artifactId>maven-assembly-plugin</artifactId>
+            <configuration>
+                <archive>
+                    <manifest>
+                        <mainClass>enterprises.orbital.evekit.dataplatform.CmdLineTool</mainClass>
+                    </manifest>
+                </archive>
+                <descriptorRefs>
+                    <descriptorRef>jar-with-dependencies</descriptorRef>
+                </descriptorRefs>
+            </configuration>
+            <executions>
+                <execution>
+                    <id>make-assembly</id>
+                    <phase>package</phase>
+                    <goals>
+                        <goal>single</goal>
+                    </goals>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>
+</project>

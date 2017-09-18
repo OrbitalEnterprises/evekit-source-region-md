@@ -1,0 +1,60 @@
+#!/bin/bash
+#
+# Retrieve market history for all regions for a given type.  Results are stored in a gzip'd snapshot file
+# per region.
+#
+# $1 - type ID
+# $2 - assembly dir
+# $3 - output dir
+# $4 - tool dir
+# $5... - list of regions to retrieve
+
+# Check a header file for an OK response
+check_header() {
+  test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/1.1 200 OK"
+}
+
+# Get market history for a given region and type
+get_market_history() {
+    curl -s --compressed -X GET --header 'Accept: application/json' -D header_${1}.txt\
+     'https://esi.tech.ccp.is/latest/markets/'$1'/history/?datasource=tranquility&type_id='$2 > page_${1}.json
+}
+
+# Setup area to receive history files
+typeid=$1
+now=$(( $(date +"%s") * 1000 ))
+here=$(pwd)
+assembly=$2/history_${typeid}_$$
+output_dir=$3
+tool_dir=$4
+mkdir -p ${assembly}
+trap "cd ${here} ; rm -rf ${assembly}" 0
+cd ${assembly}
+shift 4
+
+# Retrieve market history for every region remaining on the command line
+# Signal an error if any region has a non-200 response
+for region in $* ; do
+    get_market_history ${region} ${typeid}
+    if ! check_header header_${region}.txt ; then
+        echo "Error downloading region ${region} for type ${typeid}, continuing"
+        rm -f page_${region}.json
+    fi
+done
+
+# Store each history file in location ${output_dir}/history/${type_id}/history_${now}_${region}_${date}.gz
+#
+# Each file has format:
+# Total number of entries
+# type, region, orderCount, lowPrice, highPrice, avgPrice, volume, date (millis UTC)
+#
+mkdir -p ${output_dir}/history/${typeid}
+for region in $* ; do
+    if [ -f page_${region}.json ] ; then
+      outfile=${output_dir}/history/${typeid}/history_${now}_${region}_$(date -u +"%Y%m%d")
+      cat page_${region}.json | jq -c '.[]|['${typeid}', '${region}', .order_count, .lowest, .highest, .average, .volume, ["\(.date)T00:00:00Z"|fromdate * 1000]]' | sed -e 's/\[//g' -e 's/\]//g' > ${outfile}
+      count=$(cat ${outfile} | wc -l | tr -d '[:blank:]')
+      echo -e "${count}\n$(cat ${outfile})" > ${outfile}
+      gzip ${outfile}
+    fi
+done
