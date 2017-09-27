@@ -12,7 +12,8 @@ tmp_dir="$(jq -r -c '.tmp_dir' ${config})"
 snap_dir="$(jq -r -c '.snapshot_dir' ${config})"
 tool_home="$(jq -r -c '.tool_home' ${config})"
 thread_count=$(jq -r -c '.threads' ${config})
-ekdpport=10220
+cycle_time=$(jq -r -c '.cycle_time' ${config})
+sde_version="$(jq -r -c '.sde_version' ${config})"
 
 # Create a work area for this script
 here=$(pwd)
@@ -29,7 +30,7 @@ check_header() {
 # Retrieve region list
 get_regions() {
     if ! curl -s --compressed -X GET --header "Accept: application/json" -D region_header.txt \
-     'https://evekit-sde.orbital.enterprises/20170818/api/ws/v20170818/map/region' > regions.json ; then
+     "https://evekit-sde.orbital.enterprises/${sde_version}/api/ws/v${sde_version}/map/region" > regions.json ; then
       return 1
     fi
     if ! check_header region_header.txt ; then
@@ -46,7 +47,7 @@ get_types() {
     while [ ${done} -eq 0 ]; do
         # Retrieve next type page
         if ! curl -s --compressed -X GET --header "Accept: application/json" -D type_header.txt \
-         'https://evekit-sde.orbital.enterprises/20170818/api/ws/v20170818/inv/type?contid='${contid}'&maxresults=1000&marketGroupID=%7B%20start%3A%200%2C%20end%3A%20100000000%20%7D' > types.json ; then
+         "https://evekit-sde.orbital.enterprises/${sde_version}/api/ws/v${sde_version}/inv/type?contid=${contid}&maxresults=1000&marketGroupID=%7B%20start%3A%200%2C%20end%3A%20100000000%20%7D" > types.json ; then
             echo "curl request failure: ${contid}"
             return 1
         fi
@@ -92,7 +93,7 @@ get_or_create_tracker() {
     fi
 
     # Find current unfinished tracker
-    if ! tracked=$(echo "tracker -s ${source_id} -d markethistory unfinished" | nc localhost ${ekdpport}) ; then
+    if ! tracked=$(${tool_home}/ekdptool tracker -s ${source_id} -d markethistory unfinished) ; then
         echo "$? Fatal error finding unfinished tracker for market history: ${tracked}"
 	exit 1
     fi
@@ -100,15 +101,15 @@ get_or_create_tracker() {
     # If no existing unfinished tracker, then create one, start it, and retrieve information
     if [ -z "${tracked}" ] ; then
 	    # No tracker, create one
-	    if ! tracked=$(echo "tracker -s ${source_id} create markethistory" | nc localhost ${ekdpport}) ; then
+	    if ! tracked=$(${tool_home}/ekdptool tracker -s ${source_id} create markethistory) ; then
 	        echo "Fatal error creating tracker for market history"
 	        exit 1
 	    fi
-	    if ! (echo "tracker -s ${source_id} -t ${tracked} start ${start_time}" | nc localhost ${ekdpport}) ; then
+	    if ! (${tool_home}/ekdptool tracker -s ${source_id} -t ${tracked} start ${start_time}) ; then
 	        echo "Fatal error starting tracker for market history"
 	        exit 1
 	    fi
-	    tracked=$(echo "tracker -s ${source_id} -d markethistory unfinished" | nc localhost ${ekdpport})
+	    tracked=$(${tool_home}/ekdptool tracker -s ${source_id} -d markethistory unfinished)
     fi
 
     # Return tracker
@@ -120,11 +121,6 @@ stamp() {
     echo "$(date -u +'%Y%m%dT%H:%M:%S %Z')"
 }
 
-# Run an instance of the ekdp tool in daemon mode to make tracker management go faster
-${tool_home}/ekdptool -s${ekdpport} &
-ekdpdaemon=$!
-trap "kill -n 9 ${ekdpdaemon}" 0
-
 # Give tool a chance to start before we start sending commands
 sleep 5
 
@@ -132,9 +128,9 @@ sleep 5
 while true ; do
     # Verify we have a scheduled tracking event for the market history downloader
     echo "$(stamp) Start retrieving trackers"
-	next_tracker=$(get_or_create_tracker)
-	tracker_start=$(get_tracker_start "${next_tracker}")
-	tracker_tid=$(get_tid "${next_tracker}")
+    next_tracker=$(get_or_create_tracker)
+    tracker_start=$(get_tracker_start "${next_tracker}")
+    tracker_tid=$(get_tid "${next_tracker}")
     echo "$(stamp) Finish retrieving trackers"
 
     # If we're past the start time of the next tracker, go ahead and start it.
@@ -156,48 +152,46 @@ while true ; do
             continue
         fi
 
-        # Run retrievals in batches according to thread count
-	    echo "$(stamp) Starting retrieval for market history"
-	    tstatus="FINISHED"
-	    left=${thread_count}
-	    proc_list=''
+	# Split type list according to thread count
+	type_count=$(cat types_list.txt | wc -l)
+	type_count=$(( ${type_count} / ${thread_count} ))
+	split -l ${type_count} types_list.txt typesplit_
+
+	# Run a separate retrieval process for each split type file
+	echo "$(stamp) Starting retrieval for market history"
+	tstatus="FINISHED"
+	proc_list=''
+	for i in typesplit_* ; do
 	    while read -r next_type ; do
-	        ${tool_home}/markethistory ${next_type} "${tmp_dir}" "${snap_dir}" "${tool_home}" ${regions} &
-	        proc_list="$! ${proc_list}"
-	        left=$(( ${left} - 1 ))
-	        if [ ${left} -eq 0 ] ; then
-	            wait ${proc_list}
-	            left=${thread_count}
-	            proc_list=''
-	        fi
-	    done < types_list.txt
-	    if [ ${left} -lt ${thread_count} ] ; then
-	        wait ${proc_list}
-	    fi
+		${tool_home}/markethistory ${next_type} "${tmp_dir}" "${snap_dir}" "${tool_home}" ${regions}
+	    done < ${i} &
+	    proc_list="$! ${proc_list}"
+	done
+	wait ${proc_list}
+	
+	# Finalize tracker
+	if ! (${tool_home}/ekdptool tracker -s ${source_id} -t ${tracker_tid} end) ; then
+	    echo "Fatal error ending tracker for market history"
+	    exit 1
+	fi
+	if ! (${tool_home}/ekdptool tracker -s ${source_id} -t ${tracker_tid} status ${tstatus} OK) ; then
+	    echo "Fatal error setting status for tracker for market history"
+	    exit 1
+	fi
 
-	    # Finalize tracker
-	    if ! (echo "tracker -s ${source_id} -t "${tracker_tid}" end" | nc localhost ${ekdpport}) ; then
-	        echo "Fatal error ending tracker for market history"
-	        exit 1
-	    fi
-	    if ! (echo "tracker -s ${source_id} -t "${tracker_tid}" status ${tstatus} OK" | nc localhost ${ekdpport}) ; then
-	        echo "Fatal error setting status for tracker for market history"
-	        exit 1
-	    fi
-
-	    # Create tracker for next run no more than 11 hours after we started
-	    current=$(get_now)
-	    next_time=$(( ${now} + 11 * 60 * 60 * 1000 ))
-	    delay=$(( (${next_time} - ${current})/1000 ))
-	    if [ ${delay} -le 0 ] ; then
-	        delay=0
-	    fi
-	    get_or_create_tracker ${delay} > /dev/null
-	    echo "$(stamp) Finished retrieval for market history, next retrieval in ${delay} seconds"
+	# Create tracker for next run no more than 11 hours after we started
+	current=$(get_now)
+	next_time=$(( ${now} + ${cycle_time} * 60 * 60 * 1000 ))
+	delay=$(( (${next_time} - ${current})/1000 ))
+	if [ ${delay} -le 0 ] ; then
+	    delay=0
+	fi
+	get_or_create_tracker ${delay} > /dev/null
+	echo "$(stamp) Finished retrieval for market history, next retrieval in ${delay} seconds"
     else
-	    delay=$(( (${next_time} - ${now})/1000 ))
-	    echo "$(stamp) Sleeping for ${delay} seconds until next scheduled retrieval"
-	    sleep ${delay}
+	delay=$(( (${next_time} - ${now})/1000 ))
+	echo "$(stamp) Sleeping for ${delay} seconds until next scheduled retrieval"
+	sleep ${delay}
     fi
 done
 
