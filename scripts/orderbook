@@ -1,52 +1,57 @@
 #!/bin/bash
 #
-# Retrieve market data for a structure and store it in gzip'd snapshot file
+# Retrieve order book data for a region and store it in a gzip'd snapshot file
 #
-# $1 - structure ID
-# $2 - token ID
-# $3 - assembly dir
-# $4 - output dir
-# $5 - tool dir
+# $1 - region ID
+# $2 - assembly dir
+# $3 - output dir
+# $4 - tool dir
 
 # Check a header file for an OK response
 check_header() {
   test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/1.1 200 OK"
 }
 
-# Get a page of market data
+# Get a page of order book data
 get_page() {
-    curl -s --compressed -X GET --header "Accept: application/json" --header "Authorization: Bearer $3" -D header_$(printf %02d $2).txt \
-	 'https://esi.tech.ccp.is/latest/markets/structures/'$1'/?datasource=tranquility&page='$2 > page_$(printf %02d $2).json
+  curl -s --compressed -X GET --header "Accept: application/json" -D header_$(printf %02d $2).txt \
+       'https://esi.tech.ccp.is/latest/markets/'$1'/orders/?datasource=tranquility&page='$2 > page_$(printf %02d $2).json
+}
+
+# Generate logging timestamp
+stamp() {
+    echo "$(date -u +'%Y%m%dT%H:%M:%S %Z')"
+}
+
+# Get now in milliseconds
+get_now() {
+    echo $(( $(date +"%s") * 1000 ))
 }
 
 # Setup area to receive pages
-structure=$1
-tokenid=$2
+region=$1
 now=$(( $(date +"%s") * 1000 ))
 here=$(pwd)
-snapfilename=structure_${structure}_${now}_$(date -u +"%Y%m%d")
-assembly=$3/struct_${structure}_$$
-output_dir=$4
-tool_dir=$5
+snapfilename=region_${now}_$(date -u +"%Y%m%d")
+assembly=$2/region_${region}_$$
+output_dir=$3
+tool_dir=$4
 mkdir -p ${assembly}
 trap "cd ${here} ; rm -rf ${assembly}" 0
 cd ${assembly}
 
-# Retrieve token
-if ! auth=$(${tool_dir}/ekdptool token -k ${tokenid} refresh -s 600) ; then
-    echo "error refreshing ESI token, existing"
-    exit 1
-fi
-
 # Retrieve pages until we receive an empty response
 done=0
 page=1
+start=$(get_now)
+echo "$(stamp) Start retrieval for ${region}"
 while [ ${done} -eq 0 ] ; do
     # Retrieve next page
-    get_page ${structure} ${page} "${auth}"
+    get_page ${region} ${page} 
     if ! check_header header_$(printf %02d ${page}).txt ; then
 	# One second chance on error
-	get_page ${structure} ${page} "${auth}"
+	sleep 5
+	get_page ${region} ${page} 
     fi
 
     # Quit on error
@@ -62,14 +67,19 @@ while [ ${done} -eq 0 ] ; do
 	page=$((${page} + 1))
     fi	
 done
+end=$(get_now)
+elapsed=$(( (${end} - ${start})/1000 ))
+echo "$(stamp) Retrieval complete for ${region} in ${elapsed} seconds"
 
-# Convert result to single CSV file
-echo "order_id,type_id,location_id,volume_total,volume_remain,min_volume,price,is_buy_order,duration,issued,range" >> ${assembly}/${snapfilename}.csv
-cat page_*.json | jq -c '.[]|[.order_id, .type_id, .location_id, .volume_total, .volume_remain, .min_volume, .price, .is_buy_order, .duration, .issued, .range]' | sed -e 's/\[//g' -e 's/\]//g' -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' >> ${assembly}/${snapfilename}.csv
-gzip ${assembly}/${snapfilename}.csv
-mv ${assembly}/${snapfilename}.csv.gz ${output_dir}
-
-# Determine expiry
-seconds_expires=$(date -d "$(cat header_01.txt | egrep -e 'Expires:' | awk -F, '{print $2}')" +"%s")
-seconds_now=$(date +"%s")
-echo "expires in $((${seconds_expires} - ${seconds_now}))"
+# Output order files to snapfile with format
+#
+# <order count>
+# <order 1>
+# <order 2>
+# ...
+mkdir -p ${output_dir}/regions/${region}
+outfile=${output_dir}/regions/${region}/${snapfilename}
+cat page_*.json | jq -c '.[]|[.type_id,.order_id,.is_buy_order,["\(.issued)"|fromdate * 1000],.price,.volume_total,.min_volume,.volume_remain,.range,.location_id,.duration]' | sed -e 's/\[//g' -e 's/\]//g' -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' -e s'/"//g' | awk '{print '${region}'","$0}' >> ${outfile}
+count=$(cat ${outfile} | wc -l | tr -d '[:blank:]')
+echo -e "${count}\n$(cat ${outfile})" > ${outfile}
+gzip ${outfile}

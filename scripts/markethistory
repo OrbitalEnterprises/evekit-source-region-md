@@ -35,11 +35,16 @@ shift 4
 # Retrieve market history for every region remaining on the command line
 # Signal an error if any region has a non-200 response
 for region in $* ; do
-    get_market_history ${region} ${typeid}
-    if ! check_header header_${region}.txt ; then
-        echo "Error downloading region ${region} for type ${typeid}, continuing"
-        rm -f page_${region}.json
-    fi
+    for attempt in $(seq 10) ; do
+	get_market_history ${region} ${typeid}
+	if ! check_header header_${region}.txt ; then
+            echo "Error downloading region ${region} for type ${typeid}, attempt ${attempt}"
+            rm -f page_${region}.json
+	    sleep 5
+	else
+	    break
+	fi
+    done
 done
 
 # Store each history file in location ${output_dir}/history/${type_id}/history_${now}_${region}_${date}.gz

@@ -1,5 +1,20 @@
 # evekit-source-region-md
-Retrieve market data and market history snapshots from regions
+Retrieve order book data and market history snapshots from all EVE regions.
+
+This package consists of a Java program which is used to track snapshot retrieval
+status (against a database), as well as a series of scripts which perform the actual
+retrieval.  The tracking mechanism is part of the EveKit Data Platform.
+See the [EveKit Data Platform github project](https://github.com/OrbitalEnterprises/evekit-data-platform)
+for more details.
+
+These tools are intended to be run in a UNIX-like environment with the following dependencies:
+
+* A standard UNIX environment with bash and other common command line tools
+* Java 8 or better
+* The [`jq` command line JSON processor](https://stedolan.github.io/jq/)
+
+We've tested these tools on Linux (Ubuntu) and MacOS.  We believe these tools will also work with little difficulty
+on Windows with Cygwin.
 
 ## Build Configuration
 
@@ -17,6 +32,10 @@ be set at install time or, more typically, in your Maven profile:
 
 All other Maven configuration properties have suitable defaults defined in `pom.xml`.
 
+*NOTE:* the ESI does not currently require authentication for regional order book and history data.  Therefore, it is not
+necessary to set a proper client ID and key in the above configuration.  These values are still required by the
+underlying libraries, but they can be set to dummy values as they are not used.
+
 ## Install
 
 These instructions assume you have configured the above Maven configuration properties in a Maven profile.
@@ -28,19 +47,58 @@ mvn -P <maven profile> package
 
 ## Configuration
 
-The driver expects a configuration JSON format configuration file, a sample of which is provided in
+The two driver scripts expects a configuration JSON format configuration file, a sample of which is provided in
 the file `config.json.sample`.  This file consists of a single JSON object with the following fields:
 
 * `tool_home` - The install directory passed to the install script.
 * `source_id` - Your EveKit data platform source ID.
-* `structures` - A list of structure IDs to retrieve.
 * `tmp_dir` - A directory with sufficient space for staging market data downloads.
 * `snapshot_dir` - A directory where market data snapshots should be stored.
-* `token_id` - Your EveKit ESI token ID.
+* `threads` - The number of separate market history download processes to run.
+* `cycle_time_marketdata` - The number of minutes between successive download cycles for market history.
+* `cycle_time_orderbook` - The number of minutes between successive download cycles for order book data.
 
-Each snapshot file will be stored in a file at path:
+## Running the Tools
+
+Market history snapshots can be retrieved by running `markethistory_driver` as follows:
 
 ```bash
-${snapshot_dir}/<structure ID>/structure_<structureID>_<snaptimeInMillisUTC>_<YYYYMMDD>.csv.gz
+$ markethistory_driver config.json
+```
 
+This script will use the [EVE Swagger Interface (ESI)](https://esi.tech.ccp.is/latest/) to download the current
+set of regions and the current market types in each region; then download market history for each
+region and market type pair.  Setting the `threads` configuration parameter controls download parallelism
+(that is, the number of simulataneous region/market type pair downloads).  Once all history data has
+been retrieved, the script will sleep so that the next download cycle doesn't begin sooner than
+`cycle_time_marketdata` minutes from the start of the last cycle.
+
+We recommend setting `threads` to 20 and `cycle_time_marketdata` to 1200.  This will therefore download complete history
+at least once every 20 hours.
+
+Market history files will be stored in a file at path:
+
+```bash
+${snapshot_dir}/history/<typeID>/history_<snaptimeInMillisUTC>_<regionID>_<YYYYMMDD>.gz
+
+```
+
+Order book snapshots can be retrieved by running `orderbook_driver` as follows:
+
+```bash
+$ orderbook_drive config.json
+```
+
+This script downloads the current set of regions and spawns a separate thread to download order book snapshots
+for each region.  Each download thread will retrieve the latest snapshot, store it to disk, then sleep so that
+the next snapshot is not retrieved before `cycle_time_orderbook` minutes since the start of the previous
+retrieval.
+
+At present, the ESI caches order book data for 5 minutes.  Therefore, in order to retrieve every snapshot without
+missing data, you should set `cycle_time_orderbook` to 5.
+
+Order book files will be stored in a file at path:
+
+```bash
+${snapshot_dir}/regions/<regionID>/region_<snaptimeInMillisUTC>_<YYYYMMDD>.gz
 ```

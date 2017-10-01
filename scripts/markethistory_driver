@@ -12,8 +12,7 @@ tmp_dir="$(jq -r -c '.tmp_dir' ${config})"
 snap_dir="$(jq -r -c '.snapshot_dir' ${config})"
 tool_home="$(jq -r -c '.tool_home' ${config})"
 thread_count=$(jq -r -c '.threads' ${config})
-cycle_time=$(jq -r -c '.cycle_time' ${config})
-sde_version="$(jq -r -c '.sde_version' ${config})"
+cycle_time=$(jq -r -c '.cycle_time_marketdata' ${config})
 
 # Create a work area for this script
 here=$(pwd)
@@ -30,42 +29,37 @@ check_header() {
 # Retrieve region list
 get_regions() {
     if ! curl -s --compressed -X GET --header "Accept: application/json" -D region_header.txt \
-     "https://evekit-sde.orbital.enterprises/${sde_version}/api/ws/v${sde_version}/map/region" > regions.json ; then
+	 "https://esi.tech.ccp.is/latest/universe/regions/?datasource=tranquility" > regions.json ; then
       return 1
     fi
     if ! check_header region_header.txt ; then
       return 1
     fi
-    echo $(cat regions.json | jq -c '.[]|.regionID')
+    echo $(cat regions.json | jq -c '.[]|.')
 }
 
-# Retrieve type list
-get_types() {
+# Retrieve the expected types for a given region
+get_region_types() {
     done=0
-    contid=0
-    type_file=$1
+    page=1
+    region=$1
+    type_list=''
     while [ ${done} -eq 0 ]; do
-        # Retrieve next type page
-        if ! curl -s --compressed -X GET --header "Accept: application/json" -D type_header.txt \
-         "https://evekit-sde.orbital.enterprises/${sde_version}/api/ws/v${sde_version}/inv/type?contid=${contid}&maxresults=1000&marketGroupID=%7B%20start%3A%200%2C%20end%3A%20100000000%20%7D" > types.json ; then
-            echo "curl request failure: ${contid}"
-            return 1
-        fi
-        if ! check_header type_header.txt ; then
-            echo "header check failure"
-            return 1
-        fi
-
-        # Extract types from this page
-        cat types.json | jq -c '.[]|.typeID' >> ${type_file}
-        len=$(cat types.json | jq -c '.[]|.typeID' | wc -l)
-        contid=$(cat ${type_file} | wc -l | tr -d '[:blank:]')
-
-        # We're done if last page is empty
-        if [ ${len} -eq 0 ] ; then
-            done=1
+        if ! next_types=$(curl -s --compressed -X GET --header "Accept: application/json" -D region_type_header.txt \
+			       'https://esi.tech.ccp.is/latest/markets/'${region}'/types/?datasource=tranquility&page='${page} | jq '.[]|.') ; then
+	    return 1
+	fi
+	if ! check_header region_type_header.txt ; then
+	    return 1
+	fi
+	type_list="${next_types} ${type_list}"
+	if [ -z "${next_types}" ] ; then
+	    done=1
+	else
+	    page=$(( ${page} + 1 ))
         fi
     done
+    echo ${type_list}
 }
 
 # Get now in milliseconds
@@ -121,9 +115,6 @@ stamp() {
     echo "$(date -u +'%Y%m%dT%H:%M:%S %Z')"
 }
 
-# Give tool a chance to start before we start sending commands
-sleep 5
-
 # Run forever
 while true ; do
     # Verify we have a scheduled tracking event for the market history downloader
@@ -137,21 +128,29 @@ while true ; do
     # Otherwise, we'll sleep until the correct start time.
     now=$(get_now)
     if [ ${tracker_start} -le ${now} ] ; then
-        # Retrieve regions
-        if ! regions=$(get_regions) ; then
-            echo "Error retrieving regions, skipping this round"
-            sleep 5
-            continue
-        fi
-
-        # Set up type list
-        rm -f types_list.txt
-        if ! get_types types_list.txt ; then
-            echo "Error retrieving types, skipping this round"
-            sleep 5
-            continue
-        fi
-
+	# Build an array mapping type to the regions which should have market data for that type
+	echo "$(stamp) Build region type map"
+	unset type_region_map
+	declare -A type_region_map
+	while ! regions=$(get_regions) ; do
+	    echo "$(stamp) Failed to get region list, retrying in a few seconds"
+	    sleep 5
+	done
+	rm -f types_list.txt
+	for i in ${regions} ; do
+	    echo "$(stamp) Retrieving types for region: ${i}"
+	    while ! next_types=$(get_region_types ${i}) ; do
+		echo "$(stamp) Failed to get types for region ${i}, retrying in a few seconds"
+		sleep 5
+	    done
+	    for t in ${next_types} ; do
+		type_region_map[$t]="${i} ${type_region_map[$t]}"
+	    done
+	    echo "${next_types}" | tr ' ' '\n' |sed -e '/^$/d' >> types_list.txt
+	    cat types_list.txt | sort -u > types_list_tmp.txt
+	    mv -f types_list_tmp.txt types_list.txt
+	done
+	
 	# Split type list according to thread count
 	type_count=$(cat types_list.txt | wc -l)
 	type_count=$(( ${type_count} / ${thread_count} ))
@@ -163,7 +162,7 @@ while true ; do
 	proc_list=''
 	for i in typesplit_* ; do
 	    while read -r next_type ; do
-		${tool_home}/markethistory ${next_type} "${tmp_dir}" "${snap_dir}" "${tool_home}" ${regions}
+		${tool_home}/markethistory ${next_type} "${tmp_dir}" "${snap_dir}" "${tool_home}" ${type_region_map[${next_type}]}
 	    done < ${i} &
 	    proc_list="$! ${proc_list}"
 	done
@@ -181,7 +180,7 @@ while true ; do
 
 	# Create tracker for next run no more than 11 hours after we started
 	current=$(get_now)
-	next_time=$(( ${now} + ${cycle_time} * 60 * 60 * 1000 ))
+	next_time=$(( ${now} + ${cycle_time} * 60 * 1000 ))
 	delay=$(( (${next_time} - ${current})/1000 ))
 	if [ ${delay} -le 0 ] ; then
 	    delay=0
@@ -189,8 +188,11 @@ while true ; do
 	get_or_create_tracker ${delay} > /dev/null
 	echo "$(stamp) Finished retrieval for market history, next retrieval in ${delay} seconds"
     else
-	delay=$(( (${next_time} - ${now})/1000 ))
+	delay=$(( (${tracker_start} - ${now})/1000 ))
 	echo "$(stamp) Sleeping for ${delay} seconds until next scheduled retrieval"
+	if [ ${delay} -lt 0 ] ; then
+	    delay=0
+	fi
 	sleep ${delay}
     fi
 done

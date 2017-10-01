@@ -1,9 +1,9 @@
 {
-    "threads" : number of download processes to run,
-    "cycle_time" : hours between successive download cycles,
+    "threads" : number of download processes to run for market history retrieval,
+    "cycle_time_marketdata": minutes between successive download cycles for market history,
+    "cycle_time_orderbook": minutes between successive download cycles for order book data,
     "tool_home" : "where you installed this tool using install.sh",
     "source_id" : unique data source ID,
     "tmp_dir": "directory to be used for staging downloads of region data",
-    "snapshot_dir": "directory where snapshots should be stored",
-    "sde_version": "release version of EveKit SDE to use"
+    "snapshot_dir": "directory where snapshots should be stored"
 }

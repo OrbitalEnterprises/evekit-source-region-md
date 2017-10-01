@@ -8,6 +8,8 @@ target=$1
 mkdir -p ${target}
 cp scripts/markethistory_driver ${target}
 cp scripts/markethistory ${target}
+cp scripts/orderbook_driver ${target}
+cp scripts/orderbook ${target}
 jarfile=$(basename $(find target -name '*jar-with-dependencies*'))
 cp target/${jarfile} ${target}
 escapedloc=$(echo ${target}/${jarfile} | sed -e 's/\//\\\//g')
