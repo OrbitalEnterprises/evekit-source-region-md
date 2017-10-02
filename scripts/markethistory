@@ -56,10 +56,11 @@ done
 mkdir -p ${output_dir}/history/${typeid}
 for region in $* ; do
     if [ -f page_${region}.json ] ; then
-      outfile=${output_dir}/history/${typeid}/history_${now}_${region}_$(date -u +"%Y%m%d")
+      outfile=${assembly}/history_${now}_${region}_$(date -u +"%Y%m%d")
       cat page_${region}.json | jq -c '.[]|['${typeid}', '${region}', .order_count, .lowest, .highest, .average, .volume, ["\(.date)T00:00:00Z"|fromdate * 1000]]' | sed -e 's/\[//g' -e 's/\]//g' > ${outfile}
       count=$(cat ${outfile} | wc -l | tr -d '[:blank:]')
       echo -e "${count}\n$(cat ${outfile})" > ${outfile}
       gzip ${outfile}
+      mv ${outfile}.gz ${output_dir}/history/${typeid}
     fi
 done
