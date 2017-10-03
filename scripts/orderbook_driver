@@ -109,22 +109,15 @@ stamp() {
     echo "$(date -u +'%Y%m%dT%H:%M:%S %Z')"
 }
 
-# Run forever
-while true ; do
-    # Retrieve regions
-    echo "$(stamp) Retrieving regions"
-    if ! regions=$(get_regions) ; then
-        echo "$(stamp) Error retrieving regions, reytring in a few seconds"
-        sleep 5
-        continue
-    fi
-
-    # Start one order book retriever thread for each region.  Each thread
-    # is also responsible for controlling its own tracker.
-    proc_list=''
-    for next_region in ${regions} ; do
+# Launch an orderbook retriever for a given region
+# This function is normally launched as a separate process
+# which will wait for the subprocess to exit, automatically
+# restarting in the case of a failure.
+run_orderbook_retriever() {
+    next_region=$1
+    while true ; do
+	echo "Starting order book thread for region ${next_region}"
 	(
-	    echo "Starting order book thread for region ${next_region}"
 	    while true ; do
 		# Get a tracker 
 		echo "$(stamp) Start retrieving trackers ${next_region}"
@@ -176,8 +169,29 @@ while true ; do
 		    sleep ${delay}
 		fi
 	    done
-	    echo "$(stamp) Order book thread for region ${next_region} ended"
 	) &
+	wait $!
+	echo "$(stamp) Order book thread for region ${next_region} ended"
+	echo "$(stamp) Pausing 60 seconds before restart"
+    done
+}
+
+# Run forever
+while true ; do
+    # Retrieve regions
+    echo "$(stamp) Retrieving regions"
+    if ! regions=$(get_regions) ; then
+        echo "$(stamp) Error retrieving regions, reytring in a few seconds"
+        sleep 5
+        continue
+    fi
+    echo "$(stamp) region list: ${regions}"
+    
+    # Start one order book retriever thread for each region.  Each thread
+    # is also responsible for controlling its own tracker.
+    proc_list=''
+    for next_region in ${regions} ; do
+	run_orderbook_retriever ${next_region} &
 	proc_list="$! ${proc_list}"	
     done
     wait ${proc_list}
