@@ -116,7 +116,7 @@ stamp() {
 run_orderbook_retriever() {
     next_region=$1
     while true ; do
-	echo "Starting order book thread for region ${next_region}"
+	echo "$(stamp) Starting order book thread for region ${next_region}"
 	(
 	    while true ; do
 		# Get a tracker 
@@ -173,6 +173,7 @@ run_orderbook_retriever() {
 	wait $!
 	echo "$(stamp) Order book thread for region ${next_region} ended"
 	echo "$(stamp) Pausing 60 seconds before restart"
+	sleep 60
     done
 }
 
