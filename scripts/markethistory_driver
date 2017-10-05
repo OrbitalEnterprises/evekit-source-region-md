@@ -180,7 +180,7 @@ while true ; do
 
 	# Create tracker for next run no more than 11 hours after we started
 	current=$(get_now)
-	next_time=$(( ${now} + ${cycle_time} * 60 * 1000 ))
+	next_time=$(( ${now} + ${cycle_time} * 60 * 60 * 1000 ))
 	delay=$(( (${next_time} - ${current})/1000 ))
 	if [ ${delay} -le 0 ] ; then
 	    delay=0
