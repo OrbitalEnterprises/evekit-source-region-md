@@ -193,7 +193,9 @@ while true ; do
     proc_list=''
     for next_region in ${regions} ; do
 	run_orderbook_retriever ${next_region} &
-	proc_list="$! ${proc_list}"	
+	proc_list="$! ${proc_list}"
+	# Space out update threads to reduce contention
+	sleep 15
     done
     wait ${proc_list}
     
