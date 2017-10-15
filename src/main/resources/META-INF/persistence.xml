@@ -7,7 +7,7 @@
 
     <persistence-unit name="evekit-data-platform">
         <description>
-            This persistence unit is used to access account information such as ESI credentials
+            Persistence unit for all DB access
         </description>
 
         <class>enterprises.orbital.db.DBProperty</class>
