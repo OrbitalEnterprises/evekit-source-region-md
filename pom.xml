@@ -22,11 +22,9 @@
 <properties>
     <maven.build.timestamp.format>yyyyMMddHHmmss</maven.build.timestamp.format>
     <enterprises.orbital.evekit.build.timestamp>${maven.build.timestamp}</enterprises.orbital.evekit.build.timestamp>
-    <enterprises.orbital.evekit.dataplatform.db.registry.driver>com.mysql.jdbc.Driver</enterprises.orbital.evekit.dataplatform.db.registry.driver>
-    <enterprises.orbital.evekit.dataplatform.db.registry.dialect>org.hibernate.dialect.MySQLDialect</enterprises.orbital.evekit.dataplatform.db.registry.dialect>
-    <enterprises.orbital.evekit.dataplatform.db.account.driver>com.mysql.jdbc.Driver</enterprises.orbital.evekit.dataplatform.db.account.driver>
-    <enterprises.orbital.evekit.dataplatform.db.account.dialect>org.hibernate.dialect.MySQLDialect</enterprises.orbital.evekit.dataplatform.db.account.dialect>
-    <orbital.data.platform.version>3.1.0</orbital.data.platform.version>
+    <enterprises.orbital.evekit.dataplatform.db.driver>com.mysql.jdbc.Driver</enterprises.orbital.evekit.dataplatform.db.driver>
+    <enterprises.orbital.evekit.dataplatform.db.dialect>org.hibernate.dialect.MySQLDialect</enterprises.orbital.evekit.dataplatform.db.dialect>
+    <orbital.data.platform.version>4.0.0</orbital.data.platform.version>
 </properties>
 <dependencies>
     <dependency>

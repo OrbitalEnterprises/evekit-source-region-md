@@ -23,17 +23,14 @@ be set at install time or, more typically, in your Maven profile:
 
 * `enterprises.orbital.token.eve_client_id` - Your EVE SSO application client ID to be used to re-authorize ESI tokens.
 * `enterprises.orbital.token.eve_secret_key` - Your EVE SSO application secret key to be used to re-authorize ESI tokens.
-* `enterprises.orbital.evekit.dataplatform.db.account.url` - The MySQL connection URL for EveKit account information.
-* `enterprises.orbital.evekit.dataplatform.db.account.user` - The EveKit account database user name.
-* `enterprises.orbital.evekit.dataplatform.db.account.password` - The EveKit account database password.
-* `enterprises.orbital.evekit.dataplatform.db.registry.url` - The MySQL connection URL for the data platform.
-* `enterprises.orbital.evekit.dataplatform.db.registry.user` - The data platform database user name.
-* `enterprises.orbital.evekit.dataplatform.db.registry.password` - The data platform database password.
+* `enterprises.orbital.evekit.dataplatform.db.url` - The MySQL connection URL for EveKit Data Platform information.
+* `enterprises.orbital.evekit.dataplatform.db.user` - The EveKit Data Platform database user name.
+* `enterprises.orbital.evekit.dataplatform.db.password` - The EveKit Data Platform database password.
 
 All other Maven configuration properties have suitable defaults defined in `pom.xml`.
 
 *NOTE:* the ESI does not currently require authentication for regional order book and history data.  Therefore, it is not
-necessary to set a proper client ID and key in the above configuration.  These values are still required by the
+necessary to set a proper client ID and secret key in the above configuration.  These values are still required by the
 underlying libraries, but they can be set to dummy values as they are not used.
 
 ## Install
