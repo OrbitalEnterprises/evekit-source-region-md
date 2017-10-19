@@ -5,5 +5,5 @@
 # -*- CONFIGURED BY INSTALL SCRIPT -*-
 #
 tooljar=INSTALLCONFIG
-exec java -jar ${tooljar} "$@"
+exec java -Xmx1g -jar ${tooljar} "$@"
 
