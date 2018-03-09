@@ -11,14 +11,6 @@ tmp_dir="$(jq -r -c '.tmp_dir' ${config})"
 snap_dir="$(jq -r -c '.snapshot_dir' ${config})"
 tool_home="$(jq -r -c '.tool_home' ${config})"
 cycle_time=$(jq -r -c '.cycle_time_orderbook' ${config})
-port_start=$(jq -r -c '.orderbook_ekdp_port' ${config})
-port_count=$(jq -r -c '.orderbook_ekdp_servers' ${config})
-if [ "${port_start}" = "null" ] ; then
-    port_start=10220
-fi
-if [ "${port_count}" = "null" ] ; then
-    port_count=1
-fi
 
 # Create a work area for this script
 here=$(pwd)
@@ -26,16 +18,6 @@ work_dir=${tmp_dir}/obdriver_$$
 mkdir -p ${work_dir}
 trap "cd ${here} ; rm -rf ${work_dir}" 0
 cd ${work_dir}
-
-# Start ekdp tool servers
-ekdp_daemons=""
-for i in $(seq 0 $(( ${port_count} - 1))) ; do
-    next_port=$(( ${port_start} + ${i} ))
-    ${tool_home}/ekdptool -s${next_port} > ${tool_home}/ekdpserver_${i}.out 2>&1 &
-    ekdp_daemons="$! ${ekdp_daemons}"
-done
-trap "kill -n 9 ${ekdp_daemons}" 0
-sleep 5
 
 # Check a header file for an OK response
 check_header() {
@@ -59,25 +41,36 @@ get_now() {
     echo $(( $(date +"%s") * 1000 ))
 }
 
-# Return TID from tracked record
-get_tid() {
-    echo $(echo $1 | egrep -o 'tid=[0-9]+' | awk -F= '{print $2}')
-}
-
 # Return tracker start from tracked record
 get_tracker_start() {
-    echo $(echo $1 | egrep -o 'trackerStart=-?[0-9]+' | awk -F= '{print $2}')
+    echo $(echo ${1} | awk -F_ '{print $4}')
 }
 
+get_tracker_file() {
+    ff=${work_dir}/tracker_${1}_${2}_
+    if [ -e ${ff}* ] ; then
+	echo $(basename ${ff}*)
+    else
+	echo
+    fi
+}
+
+create_tracker_file() {
+    ff=${work_dir}/tracker_${1}_${2}_${3}
+    rm -f ${work_dir}/tracker_${1}_${2}_*
+    touch ${ff}
+    echo $(basename ${ff})
+}
+
+finish_tracker() {
+    rm -f ${1}
+}
+
+
 # Create or return the start time of the next scheduled event for the orderbook downloader
-# $1 - server port
-# $2 - region
-# $3 - start delay (optional)
+# $1 - region
+# $2 - start delay (optional)
 get_or_create_tracker() {
-    # Extract port
-    port=$1
-    shift
-    
     # Extract region
     region=$1
     shift
@@ -89,23 +82,18 @@ get_or_create_tracker() {
     fi
 
     # Find current unfinished tracker
-    if ! tracked=$(echo "tracker -s ${source_id} -d orderbook_${region} unfinished" | nc localhost ${port}) ; then
+    if ! tracked=$(get_tracker_file ${source_id} orderbook-${region}) ; then
         echo "$(stamp) Fatal error finding unfinished tracker for orderbook ${region}: ${tracked}"
 	exit 1
     fi
 
     # If no existing unfinished tracker, then create one, start it, and retrieve information
     if [ -z "${tracked}" ] ; then
-	    # No tracker, create one
-	    if ! tracked=$(echo "tracker -s ${source_id} create orderbook_${region}" | nc localhost ${port}) ; then
-	        echo "$(stamp) Fatal error creating tracker for order book ${region}"
-	        exit 1
-	    fi
-	    if ! $(echo "tracker -s ${source_id} -t ${tracked} start ${start_time}" | nc localhost ${port}) ; then
-	        echo "$(stamp) Fatal error starting tracker for order book ${region}"
-	        exit 1
-	    fi
-	    tracked=$(echo "tracker -s ${source_id} -d orderbook_${region} unfinished" | nc localhost ${port})
+	# No tracker, create one
+	if ! tracked=$(create_tracker_file ${source_id} orderbook-${region} ${start_time}) ; then
+	    echo "$(stamp) Fatal error creating tracker for order book ${region}"
+	    exit 1
+	fi
     fi
 
     # Return tracker
@@ -122,20 +110,17 @@ stamp() {
 # which will wait for the subprocess to exit, automatically
 # restarting in the case of a failure.
 #
-# $1 - assigned server port
-# $2 - region
+# $1 - region
 run_orderbook_retriever() {
-    port=$1
-    next_region=$2
+    next_region=$1
     while true ; do
 	echo "$(stamp) Starting order book thread for region ${next_region}"
 	(
 	    while true ; do
 		# Get a tracker 
 		echo "$(stamp) Start retrieving trackers ${next_region}"
-		next_tracker=$(get_or_create_tracker $port $next_region)
+		next_tracker=$(get_or_create_tracker $next_region)
 		tracker_start=$(get_tracker_start "${next_tracker}")
-		tracker_tid=$(get_tid "${next_tracker}")
 		echo "$(stamp) Finish retrieving trackers"
 
 		# Verify we're ready to start tracking, otherwise sleep until this
@@ -152,14 +137,8 @@ run_orderbook_retriever() {
 		    fi
 		    
 		    # Finalize tracker
-		    if ! (echo "tracker -s ${source_id} -t ${tracker_tid} end" | nc localhost ${port}) ; then
+		    if ! finish_tracker ${next_tracker} ; then
 			echo "$(stamp) Fatal error ending tracker for order book ${next_region}"
-			exit 1
-		    fi
-
-		    # Set tracker status
-		    if ! (echo "tracker -s ${source_id} -t ${tracker_tid} status ${tstatus} OK" | nc localhost ${port}) ; then
-			echo "$(stamp) Fatal error setting status for tracker for order book ${next_region}"
 			exit 1
 		    fi
 
@@ -170,7 +149,7 @@ run_orderbook_retriever() {
 		    if [ ${delay} -le 0 ] ; then
 			delay=0
 		    fi
-		    get_or_create_tracker ${port} ${next_region} ${delay} > /dev/null
+		    get_or_create_tracker ${next_region} ${delay} > /dev/null
 		    echo "$(stamp) Finished retrieval for order book ${next_region}, next retrieval in ${delay} seconds"
 		else
 		    delay=$(( (${tracker_start} - ${now})/1000 ))
@@ -205,10 +184,8 @@ while true ; do
     proc_list=''
     i=0
     for next_region in ${regions} ; do
-	port=$(( ${port_start} + ${i} ))
-	run_orderbook_retriever ${port} ${next_region} &
+	run_orderbook_retriever ${next_region} &
 	proc_list="$! ${proc_list}"
-	i=$(( (${i} + 1) % ${port_count} ))
 	# Space out update threads to reduce contention
 	sleep 5
     done
