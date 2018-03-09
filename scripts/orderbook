@@ -57,6 +57,7 @@ while [ ${done} -eq 0 ] ; do
     # Quit on error
     if ! check_header header_$(printf %02d ${page}).txt ; then
 	echo "error on page ${page}, exiting"
+	echo "$(cat header_$(printf %02d ${page}).txt)"
 	exit 1
     fi
 

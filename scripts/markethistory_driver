@@ -59,7 +59,7 @@ get_region_types() {
 	    page=$(( ${page} + 1 ))
         fi
     done
-    echo ${type_list}
+    echo $(echo ${type_list} | tr ' ' '\n' | sort -u)
 }
 
 # Get now in milliseconds
@@ -134,15 +134,16 @@ while true ; do
 	declare -A type_region_map
 	while ! regions=$(get_regions) ; do
 	    echo "$(stamp) Failed to get region list, retrying in a few seconds"
-	    sleep 5
+	    sleep 10
 	done
 	rm -f types_list.txt
 	for i in ${regions} ; do
 	    echo "$(stamp) Retrieving types for region: ${i}"
 	    while ! next_types=$(get_region_types ${i}) ; do
 		echo "$(stamp) Failed to get types for region ${i}, retrying in a few seconds"
-		sleep 5
+		sleep 10
 	    done
+	    echo "TYPE COUNT: $(echo ${next_types} | wc -w)"
 	    for t in ${next_types} ; do
 		type_region_map[$t]="${i} ${type_region_map[$t]}"
 	    done

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Drive exeucution of order book downloader.  This script downloads all regions, then retrievers
+# Drive exeucution of order book downloader.  This script downloads all regions, then retrieves
 # order book data for each region.
 #
 # $1 - config file
