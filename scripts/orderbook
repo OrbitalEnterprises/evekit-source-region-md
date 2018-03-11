@@ -12,6 +12,18 @@ check_header() {
   test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/1.1 200 OK"
 }
 
+get_status_code() {
+  echo $(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' | awk '{print $2}')
+}
+
+get_page_count() {
+  echo $(egrep -o 'X-Pages: [0-9]+' ${1} | awk '{print $2}')
+}
+
+get_error_limit_reset() {
+  echo $(egrep -o 'X-Esi-Error-Limit-Reset: [0-9]+' ${1} | awk '{print $2}')
+}
+
 # Get a page of order book data
 get_page() {
   curl -s --compressed -X GET --header "Accept: application/json" -D header_$(printf %02d $2).txt \
@@ -49,20 +61,37 @@ while [ ${done} -eq 0 ] ; do
     # Retrieve next page
     get_page ${region} ${page} 
     if ! check_header header_$(printf %02d ${page}).txt ; then
-	# One second chance on error
-	sleep 5
+	# If this was a 420 then wait out the reset timer
+	if [ "$(get_status_code header_$(printf %02d ${page}).txt)" = "420" ] ; then
+	    esi_timer=$(get_error_limit_reset header_$(printf %02d ${page}).txt)
+	    if [ -z "${esi_timer}" ] ; then
+		esi_timer=5
+	    fi
+	    echo "$(stamp) Waiting ${esi_timer} seconds for ESI error limiter reset"
+	    sleep ${esi_timer}
+	else
+	    # Standard delay for retry
+	    sleep 5
+	fi
 	get_page ${region} ${page} 
     fi
 
     # Quit on error
     if ! check_header header_$(printf %02d ${page}).txt ; then
-	echo "error on page ${page}, exiting"
+	echo "error on page ${page} for region ${region}, exiting"
 	echo "$(cat header_$(printf %02d ${page}).txt)"
 	exit 1
     fi
 
-    # We're done if this page is empty
-    if [ $(jq 'length' page_$(printf %02d ${page}).json) -eq 0 ] ; then
+    # Extract pages from header
+    page_count=$(get_page_count header_$(printf %02d ${page}).txt)
+    if [ -z "${page_count}" ] ; then
+	page_count=0
+    fi
+    echo "$(stamp) region ${region} - ${page} of ${page_count} pages retrieved"
+
+    # We're done if this was the last page or this page is empty
+    if [ ${page} -ge ${page_count} ] ; then
 	done=1
     else
 	page=$((${page} + 1))
