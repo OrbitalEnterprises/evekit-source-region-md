@@ -109,7 +109,7 @@ echo "$(stamp) Retrieval complete for ${region} in ${elapsed} seconds"
 # ...
 mkdir -p ${output_dir}/regions/${region}
 outfile=${assembly}/${snapfilename}
-cat page_*.json | jq -c '.[]|[.type_id,.order_id,.is_buy_order,["\(.issued)"|fromdate * 1000],.price,.volume_total,.min_volume,.volume_remain,.range,.location_id,.duration]' | sed -e 's/\[//g' -e 's/\]//g' -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' -e s'/"//g' | awk '{print '${region}'","$0}' >> ${outfile}
+cat page_*.json | jq -c '.[]|[.type_id,.order_id,.is_buy_order,["\(.issued)"|fromdate * 1000],.price,.volume_total,.min_volume,.volume_remain,.range,.location_id,.duration,.system_id]' | sed -e 's/\[//g' -e 's/\]//g' -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' -e s'/"//g' | awk '{print '${region}'","$0}' >> ${outfile}
 count=$(cat ${outfile} | wc -l | tr -d '[:blank:]')
 echo -e "${count}\n$(cat ${outfile})" > ${outfile}
 gzip ${outfile}
