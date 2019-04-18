@@ -27,7 +27,7 @@ check_header() {
 # Retrieve region list
 get_regions() {
     if ! curl -s --compressed -X GET --header "Accept: application/json" -D region_header.txt \
-	 "https://esi.tech.ccp.is/latest/universe/regions/?datasource=tranquility" > regions.json ; then
+	 "https://esi.evetech.net/latest/universe/regions/?datasource=tranquility" > regions.json ; then
       return 1
     fi
     if ! check_header region_header.txt ; then

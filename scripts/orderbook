@@ -27,7 +27,7 @@ get_error_limit_reset() {
 # Get a page of order book data
 get_page() {
   curl -s --compressed -X GET --header "Accept: application/json" -D header_$(printf %02d $2).txt \
-       'https://esi.tech.ccp.is/latest/markets/'$1'/orders/?datasource=tranquility&page='$2 > page_$(printf %02d $2).json
+       'https://esi.evetech.net/latest/markets/'$1'/orders/?datasource=tranquility&page='$2 > page_$(printf %02d $2).json
 }
 
 # Generate logging timestamp
