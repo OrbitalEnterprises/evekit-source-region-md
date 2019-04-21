@@ -1,0 +1,312 @@
+#!/bin/bash
+#
+# Retrieve public contract data for a region and store it in a gzip'd snapshot file
+#
+# $1 - region ID
+# $2 - assembly dir
+# $3 - output dir
+
+# Check a header file for an OK response
+check_header() {
+  test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/1.1 200 OK"
+}
+
+get_status_code() {
+  echo $(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' | awk '{print $2}')
+}
+
+get_page_count() {
+  echo $(egrep -o 'X-Pages: [0-9]+' ${1} | awk '{print $2}')
+}
+
+get_error_limit_reset() {
+  echo $(egrep -o 'X-Esi-Error-Limit-Reset: [0-9]+' ${1} | awk '{print $2}')
+}
+
+# Get a page of public contract data
+get_page() {
+  curl -s --compressed -X GET --header "Accept: application/json" -D header_$(printf %02d $2).txt \
+       'https://esi.evetech.net/latest/contracts/public/'$1'/?datasource=tranquility&page='$2 > page_$(printf %02d $2).json
+}
+
+# Get a page of contract items
+get_item_page() {
+  curl -s --compressed -X GET --header "Accept: application/json" -D item_$1_header_$(printf %02d $2).txt \
+       'https://esi.evetech.net/latest/contracts/public/items/'$1'/?datasource=tranquility&page='$2 > item_$1_page_$(printf %02d $2).json
+}
+
+# Get a page of contract items
+get_bid_page() {
+  curl -s --compressed -X GET --header "Accept: application/json" -D bid_$1_header_$(printf %02d $2).txt \
+       'https://esi.evetech.net/latest/contracts/public/bids/'$1'/?datasource=tranquility&page='$2 > bid_$1_page_$(printf %02d $2).json
+}
+
+# Generate logging timestamp
+stamp() {
+    echo "$(date -u +'%Y%m%dT%H:%M:%S %Z')"
+}
+
+# Get now in milliseconds
+get_now() {
+    echo $(( $(date +"%s") * 1000 ))
+}
+
+# Retrieve contract items for a given contract into a named file
+# $1 - contract_id
+# $2 - filename
+# $3 - region_id
+retrieve_contract_items() {
+    local ct_done=0
+    local ct_page=1
+    while [ ${ct_done} -eq 0 ] ; do
+	# Retrieve next page
+	get_item_page $1 ${ct_page}
+	local hdr_page=item_$1_header_$(printf %02d ${ct_page}).txt
+	if ! check_header ${hdr_page} ; then
+	    # If this was a 420 then wait out the reset timer
+	    if [ "$(get_status_code ${hdr_page})" = "420" ] ; then
+		esi_timer=$(get_error_limit_reset ${hdr_page})
+		if [ -z "${esi_timer}" ] ; then
+		    esi_timer=5
+		fi
+		echo "$(stamp) region $3 - Waiting ${esi_timer} seconds for ESI error limiter reset"
+		sleep ${esi_timer}
+	    else
+		# Standard delay for retry
+		sleep 5
+	    fi
+	    get_item_page $1 ${ct_page} 
+	fi
+
+	# Quit on error
+	if ! check_header ${hdr_page} ; then
+	    echo "region $3 - error on page ${ct_page} for contract $1, skipping"
+	    echo "$(cat ${hdr_page})"
+	    return 1
+	fi
+
+	# Extract pages from header
+	local ct_page_count=$(get_page_count ${hdr_page})
+	if [ -z "${ct_page_count}" ] ; then
+	    ct_page_count=0
+	fi
+
+	# We're done if this was the last page or this page is empty
+	if [ ${ct_page} -ge ${ct_page_count} ] ; then
+	    ct_done=1
+	else
+	    ct_page=$((${ct_page} + 1))
+	fi	
+    done
+
+    # Dump retrieved pages into target file
+    #
+    # is_blueprint_copy boolean
+    # is_included*	boolean
+    # item_id	integer($int64)
+    # material_efficiency	integer($int32)
+    # quantity*	integer($int32)
+    # record_id*	integer($int64)
+    # runs	integer($int32)
+    # time_efficiency	integer($int32)
+    # type_id*	integer($int32)
+    #
+    'rm' -f $2
+    echo "is_blueprint_copy,is_included,item_id,material_efficiency,quantity,record_id,runs,time_efficiency,type_id" > $2
+    cat item_$1_page_*.json | jq -c '.[]|[.is_blueprint_copy,.is_included,.item_id,.material_efficiency,.quantity,.record_id,.runs,.time_efficiency,.type_id]' | sed -e 's/\[//g' -e 's/\]//g' -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' -e s'/"//g' >> $2
+}
+
+# Retrieve contract bids for a given contract into a named file
+# $1 - contract_id
+# $2 - filename
+# $3 - region_id
+retrieve_contract_bids() {
+    local ct_done=0
+    local ct_page=1
+    while [ ${ct_done} -eq 0 ] ; do
+	# Retrieve next page
+	get_bid_page $1 ${ct_page}
+	local hdr_page=bid_$1_header_$(printf %02d ${ct_page}).txt
+	if ! check_header ${hdr_page} ; then
+	    # If this was a 420 then wait out the reset timer
+	    if [ "$(get_status_code ${hdr_page})" = "420" ] ; then
+		esi_timer=$(get_error_limit_reset ${hdr_page})
+		if [ -z "${esi_timer}" ] ; then
+		    esi_timer=5
+		fi
+		echo "$(stamp) region $3 - Waiting ${esi_timer} seconds for ESI error limiter reset"
+		sleep ${esi_timer}
+	    else
+		# Standard delay for retry
+		sleep 5
+	    fi
+	    get_bid_page $1 ${ct_page} 
+	fi
+
+	# Quit on error
+	if ! check_header ${hdr_page} ; then
+	    echo "region $3 - error on page ${ct_page} for contract $1, skipping"
+	    echo "$(cat ${hdr_page})"
+	    return 1
+	fi
+
+	# Extract pages from header
+	local ct_page_count=$(get_page_count ${hdr_page})
+	if [ -z "${ct_page_count}" ] ; then
+	    ct_page_count=0
+	fi
+
+	# We're done if this was the last page or this page is empty
+	if [ ${ct_page} -ge ${ct_page_count} ] ; then
+	    ct_done=1
+	else
+	    ct_page=$((${ct_page} + 1))
+	fi	
+    done
+
+    # Dump retrieved pages into target file
+    #
+    # amount*	number($float)
+    # bid_id*	integer($int32)
+    # date_bid*	string($date-time)
+    #
+    'rm' -f $2
+    echo "amount,bid_id,date_bid" > $2
+    cat bid_$1_page_*.json | jq -c '.[]|[.amount,.bid_id,["\(.date_bid)"|fromdate * 1000]]' | sed -e 's/\[//g' -e 's/\]//g' -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' -e s'/"//g' >> $2
+}
+
+# Setup area to receive pages
+region=$1
+now=$(( $(date +"%s") * 1000 ))
+here=$(pwd)
+snapfilename=region_contracts_${now}_$(date -u +"%Y%m%d").csv
+assembly=$2/region_contracts_${region}_$$
+output_dir=$3
+mkdir -p ${assembly}
+trap "cd ${here} ; rm -rf ${assembly}" 0
+cd ${assembly}
+
+# Retrieve pages until we receive an empty response
+done=0
+page=1
+start=$(get_now)
+echo "$(stamp) Start retrieval for ${region}"
+while [ ${done} -eq 0 ] ; do
+    # Retrieve next page
+    get_page ${region} ${page} 
+    if ! check_header header_$(printf %02d ${page}).txt ; then
+	# If this was a 420 then wait out the reset timer
+	if [ "$(get_status_code header_$(printf %02d ${page}).txt)" = "420" ] ; then
+	    esi_timer=$(get_error_limit_reset header_$(printf %02d ${page}).txt)
+	    if [ -z "${esi_timer}" ] ; then
+		esi_timer=5
+	    fi
+	    echo "$(stamp) region ${region} - Waiting ${esi_timer} seconds for ESI error limiter reset"
+	    sleep ${esi_timer}
+	else
+	    # Standard delay for retry
+	    sleep 5
+	fi
+	get_page ${region} ${page} 
+    fi
+
+    # Quit on error
+    if ! check_header header_$(printf %02d ${page}).txt ; then
+	echo "error on page ${page} for region ${region}, exiting"
+	echo "$(cat header_$(printf %02d ${page}).txt)"
+	exit 1
+    fi
+
+    # Extract pages from header
+    page_count=$(get_page_count header_$(printf %02d ${page}).txt)
+    if [ -z "${page_count}" ] ; then
+	page_count=0
+    fi
+    echo "$(stamp) region ${region} - ${page} of ${page_count} pages retrieved"
+
+    # We're done if this was the last page or this page is empty
+    if [ ${page} -ge ${page_count} ] ; then
+	done=1
+    else
+	page=$((${page} + 1))
+    fi	
+done
+end=$(get_now)
+elapsed=$(( (${end} - ${start})/1000 ))
+echo "$(stamp) Retrieval complete for ${region} in ${elapsed} seconds"
+
+# buyout	                number($double)
+# collateral	                number($double)
+# contract_id*	                integer($int32)
+# date_expired*	                string($date-time)
+# date_issued*	                string($date-time)
+# days_to_complete	        integer($int32)
+# end_location_id	        integer($int64)
+# for_corporation	        boolean
+# issuer_corporation_id*	integer($int32)
+# issuer_id*	                integer($int32)
+# price	                        number($double)
+# reward	                number($double)
+# start_location_id	        integer($int64)
+# title	                        string
+# type*	                        string
+# volume	                number($double)
+
+# Latest contract list is output as a snapshot file:
+#
+# region_contracts_${now}_$(date -u +"%Y%m%d").csv.gz
+#
+# We post-process each snapshot and create any missing item or bids files:
+#
+# contract_<contract_id>_bids.txt - contract bids for auctions
+#
+# contract_<contract_id>_items.txt - contract items for item exchanges
+#
+# If the does not exist and is an item exchange, then 
+mkdir -p ${output_dir}/contract_regions/${region}
+outfile=${assembly}/${snapfilename}
+echo 'buyout,collateral,contract_id,date_expired,date_issued,days_to_complete,end_location_id,for_corporation,issuer_corporation_id,issuer_id,price,reward,start_location_id,title,type,volume' > ${outfile}
+cat page_*.json | jq -c '.[]|[.buyout,.collateral,.contract_id,["\(.date_expired)"|fromdate * 1000],["\(.date_issued)"|fromdate * 1000],.days_to_complete,.end_location_id,.for_corporation,.issuer_corporation_id,.issuer_id,.price,.reward,.start_location_id,.title,.type,.volume]' | sed -e 's/\[//g' -e 's/\]//g' -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g' -e s'/"//g' >> ${outfile}.tmp
+cat ${outfile}.tmp >> ${outfile}
+
+count=$(cat ${outfile}.tmp | wc -l | tr -d '[:blank:]')
+echo "$(stamp) region ${region} - Processing ${count} contracts"
+processed=0
+items_updated=0
+bids_updated=0
+
+while IFS="" read -r ct || [ -n "$ct" ] ; do    
+    contract_id=$(echo ${ct} | awk -F, '{print $3}')
+    expired=$(echo ${ct} | awk -F, '{print $4}')
+    tp=$(echo ${ct} | awk -F, '{print $15}')
+
+    if [ ${now} -lt ${expired} ] ; then
+	# Only retrieve the items file if it doesn't already exist
+	item_file=${output_dir}/contract_regions/${region}/contract_${contract_id}_items.txt
+	if [ \( "${tp}" = "item_exchange" \) -a \( ! -f ${item_file} \) ] ; then
+	    retrieve_contract_items ${contract_id} ${item_file} ${region}
+	    items_updated=$(( items_updated + 1 ))
+	fi
+
+	# Always retrieve the bids file as this is how we discover new bids
+	bids_file=${output_dir}/contract_regions/${region}/contract_${contract_id}_bids.txt
+	if [ "${tp}" = "auction" ] ; then
+	    retrieve_contract_bids ${contract_id} ${bids_file} ${region}
+	    bids_updated=$(( bids_updated + 1 ))
+	fi
+    fi
+
+    processed=$(( processed + 1 ))
+    if (( ${processed} % 1000 == 0 )) ; then
+	echo "$(stamp) region ${region} - Processed ${processed} contracts"
+    fi
+done < ${outfile}.tmp
+
+gzip ${outfile}
+mv ${outfile}.gz ${output_dir}/contract_regions/${region}
+
+end=$(get_now)
+elapsed=$(( (${end} - ${start})/1000 ))
+echo "$(stamp) Region ${region} - items updated ${items_updated} - bids updated ${bids_updated}"
+echo "$(stamp) All processing complete for ${region} in ${elapsed} seconds"
+

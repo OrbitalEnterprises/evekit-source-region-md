@@ -2,6 +2,7 @@
     "threads" : number of download processes to run for market history retrieval,
     "cycle_time_marketdata": minutes between successive download cycles for market history,
     "cycle_time_orderbook": minutes between successive download cycles for order book data,
+    "cycle_time_contracts": minutes between successive download cycles for contracts,
     "tool_home" : "where you installed this tool using install.sh",
     "source_id" : unique data source ID,
     "tmp_dir": "directory to be used for staging downloads of region data",

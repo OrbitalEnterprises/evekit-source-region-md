@@ -1,0 +1,195 @@
+#!/bin/bash
+#
+# Drive exeucution of contract downloader.  This script downloads all regions, then retrieves
+# contract data for each region.
+#
+# $1 - config file
+#
+config=$1
+source_id=$(jq -r -c '.source_id' ${config})
+tmp_dir="$(jq -r -c '.tmp_dir' ${config})"
+snap_dir="$(jq -r -c '.snapshot_dir' ${config})"
+tool_home="$(jq -r -c '.tool_home' ${config})"
+cycle_time=$(jq -r -c '.cycle_time_contracts' ${config})
+
+# Create a work area for this script
+here=$(pwd)
+work_dir=${tmp_dir}/contractdriver_$$
+mkdir -p ${work_dir}
+trap "cd ${here} ; rm -rf ${work_dir}" 0
+cd ${work_dir}
+
+# Check a header file for an OK response
+check_header() {
+  test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/1.1 200 OK"
+}
+
+# Retrieve region list
+get_regions() {
+    if ! curl -s --compressed -X GET --header "Accept: application/json" -D region_header.txt \
+	 "https://esi.evetech.net/latest/universe/regions/?datasource=tranquility" > regions.json ; then
+      return 1
+    fi
+    if ! check_header region_header.txt ; then
+      return 1
+    fi
+    echo $(cat regions.json | jq -c '.[]|.')
+}
+
+# Get now in milliseconds
+get_now() {
+    echo $(( $(date +"%s") * 1000 ))
+}
+
+# Return tracker start from tracked record
+get_tracker_start() {
+    echo $(echo ${1} | awk -F_ '{print $4}')
+}
+
+get_tracker_file() {
+    ff=${work_dir}/tracker_${1}_${2}_
+    if [ -e ${ff}* ] ; then
+	echo $(basename ${ff}*)
+    else
+	echo
+    fi
+}
+
+create_tracker_file() {
+    ff=${work_dir}/tracker_${1}_${2}_${3}
+    rm -f ${work_dir}/tracker_${1}_${2}_*
+    touch ${ff}
+    echo $(basename ${ff})
+}
+
+finish_tracker() {
+    rm -f ${1}
+}
+
+
+# Create or return the start time of the next scheduled event for the contract downloader
+# $1 - region
+# $2 - start delay (optional)
+get_or_create_tracker() {
+    # Extract region
+    region=$1
+    shift
+
+    # Check for existing unfinished tracker first
+    start_time=$(get_now)
+    if [ $# -gt 0 ] ; then
+	    start_time=$(( ${start_time} + ($1 * 1000) ))
+    fi
+
+    # Find current unfinished tracker
+    if ! tracked=$(get_tracker_file ${source_id} contracts-${region}) ; then
+        echo "$(stamp) Fatal error finding unfinished tracker for contracts ${region}: ${tracked}"
+	exit 1
+    fi
+
+    # If no existing unfinished tracker, then create one, start it, and retrieve information
+    if [ -z "${tracked}" ] ; then
+	# No tracker, create one
+	if ! tracked=$(create_tracker_file ${source_id} contracts-${region} ${start_time}) ; then
+	    echo "$(stamp) Fatal error creating tracker for contracts ${region}"
+	    exit 1
+	fi
+    fi
+
+    # Return tracker
+    echo "${tracked}"
+}
+
+# Generate logging timestamp
+stamp() {
+    echo "$(date -u +'%Y%m%dT%H:%M:%S %Z')"
+}
+
+# Launch a contracts retriever for a given region
+# This function is normally launched as a separate process
+# which will wait for the subprocess to exit, automatically
+# restarting in the case of a failure.
+#
+# $1 - region
+run_contracts_retriever() {
+    next_region=$1
+    while true ; do
+	echo "$(stamp) Starting contracts thread for region ${next_region}"
+	(
+	    while true ; do
+		# Get a tracker 
+		echo "$(stamp) Start retrieving trackers ${next_region}"
+		next_tracker=$(get_or_create_tracker $next_region)
+		tracker_start=$(get_tracker_start "${next_tracker}")
+		echo "$(stamp) Finish retrieving trackers"
+
+		# Verify we're ready to start tracking, otherwise sleep until this
+		# tracker says to start.
+		now=$(get_now)
+		if [ ${tracker_start} -le ${now} ] ; then
+		    # Assume we'll complete ok
+		    tstatus="FINISHED"
+		    
+		    # Retrieve order book
+		    if ! ${tool_home}/contracts ${next_region} "${tmp_dir}" "${snap_dir}" ; then
+			echo "$(stamp) Retrieval failed for contracts ${next_region}"
+			tstatus="ERROR"
+		    fi
+		    
+		    # Finalize tracker
+		    if ! finish_tracker ${next_tracker} ; then
+			echo "$(stamp) Fatal error ending tracker for contracts ${next_region}"
+			exit 1
+		    fi
+
+		    # Create tracker based on cycle time in minutes
+		    current=$(get_now)
+		    next_time=$(( ${now} + ${cycle_time} * 60 * 1000 ))
+		    delay=$(( (${next_time} - ${current})/1000 ))
+		    if [ ${delay} -le 0 ] ; then
+			delay=0
+		    fi
+		    get_or_create_tracker ${next_region} ${delay} > /dev/null
+		    echo "$(stamp) Finished retrieval for contracts ${next_region}, next retrieval in ${delay} seconds"
+		else
+		    delay=$(( (${tracker_start} - ${now})/1000 ))
+		    echo "$(stamp) Sleeping for ${delay} seconds until next scheduled retrieval for contracts ${next_region}"
+		    if [ ${delay} -lt 0 ] ; then
+			delay=0
+		    fi
+		    sleep ${delay}
+		fi
+	    done
+	) &
+	wait $!
+	echo "$(stamp) Contracts thread for region ${next_region} ended"
+	echo "$(stamp) Pausing 60 seconds before restart"
+	sleep 60
+    done
+}
+
+# Run forever
+while true ; do
+    # Retrieve regions
+    echo "$(stamp) Retrieving regions"
+    if ! regions=$(get_regions) ; then
+        echo "$(stamp) Error retrieving regions, reytring in a few seconds"
+        sleep 5
+        continue
+    fi
+    echo "$(stamp) region list: ${regions}"
+    
+    # Start one contracts retriever thread for each region.  Each thread
+    # is also responsible for controlling its own tracker.
+    proc_list=''
+    i=0
+    for next_region in ${regions} ; do
+	run_contracts_retriever ${next_region} &
+	proc_list="$! ${proc_list}"
+	# Space out update threads to reduce contention
+	sleep 5
+    done
+    wait ${proc_list}
+    
+done
+

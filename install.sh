@@ -10,6 +10,8 @@ cp scripts/markethistory_driver ${target}
 cp scripts/markethistory ${target}
 cp scripts/orderbook_driver ${target}
 cp scripts/orderbook ${target}
+cp scripts/contracts_driver ${target}
+cp scripts/contracts ${target}
 jarfile=$(basename $(find target -name '*jar-with-dependencies*'))
 cp target/${jarfile} ${target}
 escapedloc=$(echo ${target}/${jarfile} | sed -e 's/\//\\\//g')
