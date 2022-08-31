@@ -16,9 +16,9 @@ check_header() {
 
 # Get market history for a given region and type
 get_market_history() {
-    echo '|https://esi.tech.ccp.is/latest/markets/'$1'/history/?datasource=tranquility&type_id='$2'|'
+    echo '|https://esi.evetech.net/latest/markets/'$1'/history/?datasource=tranquility&type_id='$2'|'
     curl -s --compressed -X GET --header 'Accept: application/json' -D header_${1}.txt\
-     'https://esi.tech.ccp.is/latest/markets/'$1'/history/?datasource=tranquility&type_id='$2 > page_${1}.json
+     'https://esi.evetech.net/latest/markets/'$1'/history/?datasource=tranquility&type_id='$2 > page_${1}.json
 }
 
 # Setup area to receive history files

@@ -9,13 +9,18 @@
 
 # Check a header file for an OK response
 check_header() {
-  test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/1.1 200 OK"
+  test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/2 200"
 }
 
 # Get a page of order book data
 get_page() {
   curl -s --compressed -X GET --header "Accept: application/json" -D header_$(printf %02d $2).txt \
-       'https://esi.tech.ccp.is/latest/markets/'$1'/orders/?datasource=tranquility&page='$2 > page_$(printf %02d $2).json
+       'https://esi.evetech.net/latest/markets/'$1'/orders/?datasource=tranquility&page='$2 > page_$(printf %02d $2).json
+}
+
+# Extra page count from header
+get_total_pages() {
+  echo $(cat ${1} | awk '/x-pages:/ { printf("%d",$2) }')
 }
 
 # Generate logging timestamp
@@ -40,7 +45,7 @@ mkdir -p ${assembly}
 trap "cd ${here} ; rm -rf ${assembly}" 0
 cd ${assembly}
 
-# Retrieve pages until we receive an empty response
+# Retrieve specified number of pages
 done=0
 page=1
 start=$(get_now)
@@ -61,12 +66,21 @@ while [ ${done} -eq 0 ] ; do
 	exit 1
     fi
 
-    # We're done if this page is empty
-    if [ $(jq 'length' page_$(printf %02d ${page}).json) -eq 0 ] ; then
+    # Extract total page count and stop if we've received the last page
+    max_pages=$(get_total_pages header_$(printf %02d ${page}).txt)
+    if [ ${page} -ge ${max_pages} ] ; then
 	done=1
     else
 	page=$((${page} + 1))
     fi	
+	
+
+    # We're done if this page is empty
+    #if [ $(jq 'length' page_$(printf %02d ${page}).json) -eq 0 ] ; then
+    #	done=1
+    #else
+    #   page=$((${page} + 1))
+    #fi	
 done
 end=$(get_now)
 elapsed=$(( (${end} - ${start})/1000 ))

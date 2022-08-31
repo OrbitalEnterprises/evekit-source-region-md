@@ -29,7 +29,7 @@ check_header() {
 # Retrieve region list
 get_regions() {
     if ! curl -s --compressed -X GET --header "Accept: application/json" -D region_header.txt \
-	 "https://esi.tech.ccp.is/latest/universe/regions/?datasource=tranquility" > regions.json ; then
+	 "https://esi.evetech.net/latest/universe/regions/?datasource=tranquility" > regions.json ; then
       return 1
     fi
     if ! check_header region_header.txt ; then
@@ -46,7 +46,7 @@ get_region_types() {
     type_list=''
     while [ ${done} -eq 0 ]; do
         if ! next_types=$(curl -s --compressed -X GET --header "Accept: application/json" -D region_type_header.txt \
-			       'https://esi.tech.ccp.is/latest/markets/'${region}'/types/?datasource=tranquility&page='${page} | jq '.[]|.') ; then
+			       'https://esi.evetech.net/latest/markets/'${region}'/types/?datasource=tranquility&page='${page} | jq '.[]|.') ; then
 	    return 1
 	fi
 	if ! check_header region_type_header.txt ; then

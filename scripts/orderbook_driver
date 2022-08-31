@@ -21,13 +21,13 @@ cd ${work_dir}
 
 # Check a header file for an OK response
 check_header() {
-  test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/1.1 200 OK"
+  test "$(head -1 ${1} | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')" == "HTTP/2 200"
 }
 
 # Retrieve region list
 get_regions() {
     if ! curl -s --compressed -X GET --header "Accept: application/json" -D region_header.txt \
-	 "https://esi.tech.ccp.is/latest/universe/regions/?datasource=tranquility" > regions.json ; then
+	 "https://esi.evetech.net/latest/universe/regions/?datasource=tranquility" > regions.json ; then
       return 1
     fi
     if ! check_header region_header.txt ; then
